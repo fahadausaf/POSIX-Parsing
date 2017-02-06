@@ -1,0 +1,24 @@
+Theories:
+=========
+
+ Lexer.thy
+ Simplifying.thy
+
+The repository can be checked using Isabelle 2016.
+
+  isabelle build -c -v -d . Lex
+
+  isabelle build -c -v -d . Paper
+
+Othe directories are:
+=====================
+
+  Paper
+  Literature
+  
+
+
+
+
+
+
