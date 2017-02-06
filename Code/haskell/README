@@ -1,0 +1,4 @@
+compile with
+
+
+ghc -O3 --make -with-rtsopts='-K128m' re.hs

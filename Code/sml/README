@@ -1,0 +1,8 @@
+
+1) call poly
+2) use "re.ML";
+
+or, call directly
+
+
+poly --use re.ML 
