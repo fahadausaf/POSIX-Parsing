@@ -1,0 +1,31 @@
+session "Lex" = HOL +
+  theories [document = false]
+        "Spec"
+	(*"SpecExt"*)
+        "Lexer"
+        (*"LexerExt"*)
+        "Simplifying"
+        "Sulzmann" 
+        "Positions"
+	(*"PositionsExt"*)
+        "Exercises"
+
+session Paper in "Paper" = Lex +
+  options [document = pdf, document_output = "..", document_variants="paper"]
+  theories 
+    "~~/src/HOL/Library/LaTeXsugar"
+    "Paper"
+  document_files
+    "root.bib"
+    "root.tex" 
+
+
+session Journal in "Journal" = Lex +
+  options [document = pdf, document_output = "..", document_variants="journal"]
+  theories 
+    "~~/src/HOL/Library/LaTeXsugar"
+    "Paper"
+    "PaperExt"
+  document_files
+    "root.bib"
+    "root.tex" 

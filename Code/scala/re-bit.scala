@@ -9,7 +9,7 @@ case class CHAR(c: Char) extends Rexp
 case class ALT(r1: Rexp, r2: Rexp) extends Rexp 
 case class SEQ(r1: Rexp, r2: Rexp) extends Rexp 
 case class STAR(r: Rexp) extends Rexp 
-case class RECD(x: String, r: Rexp) extends Rexp
+
 
 abstract class ARexp 
 case object AZERO extends ARexp
@@ -26,7 +26,7 @@ case class Sequ(v1: Val, v2: Val) extends Val
 case class Left(v: Val) extends Val
 case class Right(v: Val) extends Val
 case class Stars(vs: List[Val]) extends Val
-case class Rec(x: String, v: Val) extends Val
+
    
 // some convenience for typing in regular expressions
 def charlist2rexp(s : List[Char]): Rexp = s match {
@@ -48,8 +48,72 @@ implicit def stringOps(s: String) = new {
   def % = STAR(s)
   def ~ (r: Rexp) = SEQ(s, r)
   def ~ (r: String) = SEQ(s, r)
-  def $ (r: Rexp) = RECD(s, r)
 }
+
+
+// nullable function: tests whether the regular 
+// expression can recognise the empty string
+def nullable (r: Rexp) : Boolean = r match {
+  case ZERO => false
+  case ONE => true
+  case CHAR(_) => false
+  case ALT(r1, r2) => nullable(r1) || nullable(r2)
+  case SEQ(r1, r2) => nullable(r1) && nullable(r2)
+  case STAR(_) => true
+}
+
+// derivative of a regular expression w.r.t. a character
+def der (c: Char, r: Rexp) : Rexp = r match {
+  case ZERO => ZERO
+  case ONE => ZERO
+  case CHAR(d) => if (c == d) ONE else ZERO
+  case ALT(r1, r2) => ALT(der(c, r1), der(c, r2))
+  case SEQ(r1, r2) => 
+    if (nullable(r1)) ALT(SEQ(der(c, r1), r2), der(c, r2))
+    else SEQ(der(c, r1), r2)
+  case STAR(r) => SEQ(der(c, r), STAR(r))
+}
+
+// derivative w.r.t. a string (iterates der)
+def ders (s: List[Char], r: Rexp) : Rexp = s match {
+  case Nil => r
+  case c::s => ders(s, der(c, r))
+}
+
+// mkeps and injection part
+def mkeps(r: Rexp) : Val = r match {
+  case ONE => Empty
+  case ALT(r1, r2) => 
+    if (nullable(r1)) Left(mkeps(r1)) else Right(mkeps(r2))
+  case SEQ(r1, r2) => Sequ(mkeps(r1), mkeps(r2))
+  case STAR(r) => Stars(Nil)
+}
+
+
+def inj(r: Rexp, c: Char, v: Val) : Val = (r, v) match {
+  case (STAR(r), Sequ(v1, Stars(vs))) => Stars(inj(r, c, v1)::vs)
+  case (SEQ(r1, r2), Sequ(v1, v2)) => Sequ(inj(r1, c, v1), v2)
+  case (SEQ(r1, r2), Left(Sequ(v1, v2))) => Sequ(inj(r1, c, v1), v2)
+  case (SEQ(r1, r2), Right(v2)) => Sequ(mkeps(r1), inj(r2, c, v2))
+  case (ALT(r1, r2), Left(v1)) => Left(inj(r1, c, v1))
+  case (ALT(r1, r2), Right(v2)) => Right(inj(r2, c, v2))
+  case (CHAR(d), Empty) => Chr(c) 
+}
+
+// main lexing function (produces a value)
+// - no simplification
+def lex(r: Rexp, s: List[Char]) : Val = s match {
+  case Nil => if (nullable(r)) mkeps(r) 
+              else throw new Exception("Not matched")
+  case c::cs => inj(r, c, lex(der(c, r), cs))
+}
+
+def lexing(r: Rexp, s: String) : Val = lex(r, s.toList)
+
+
+
+// Bitcoded + Annotation
+//=======================
 
 // translation into ARexps
 def fuse(bs: List[Boolean], r: ARexp) : ARexp = r match {
@@ -68,10 +132,21 @@ def internalise(r: Rexp) : ARexp = r match {
   case ALT(r1, r2) => AALT(Nil, fuse(List(false), internalise(r1)), fuse(List(true), internalise(r2)))
   case SEQ(r1, r2) => ASEQ(Nil, internalise(r1), internalise(r2))
   case STAR(r) => ASTAR(Nil, internalise(r))
-  case RECD(x, r) => internalise(r)
 }
 
 internalise(("a" | "ab") ~ ("b" | ""))
+
+def retrieve(r: ARexp, v: Val) : List[Boolean] = (r, v) match {
+  case (AONE(bs), Empty) => bs
+  case (ACHAR(bs, c), Chr(d)) => bs
+  case (AALT(bs, r1, r2), Left(v)) => bs ++ retrieve(r1, v)
+  case (AALT(bs, r1, r2), Right(v)) => bs ++ retrieve(r2, v)
+  case (ASEQ(bs, r1, r2), Sequ(v1, v2)) => 
+    bs ++ retrieve(r1, v1) ++ retrieve(r2, v2)
+  case (ASTAR(bs, r), Stars(Nil)) => bs ++ List(true)
+  case (ASTAR(bs, r), Stars(v :: vs)) => 
+     bs ++ List(false) ++ retrieve(r, v) ++ retrieve(ASTAR(Nil, r), Stars(vs))
+}
 
 
 def decode_aux(r: Rexp, bs: List[Boolean]) : (Val, List[Boolean]) = (r, bs) match {
@@ -96,10 +171,6 @@ def decode_aux(r: Rexp, bs: List[Boolean]) : (Val, List[Boolean]) = (r, bs) matc
     (Stars(v::vs), bs2)
   }
   case (STAR(_), true::bs) => (Stars(Nil), bs)
-  case (RECD(x, r1), bs) => {
-    val (v, bs1) = decode_aux(r1, bs)
-    (Rec(x, v), bs1)
-  }
 }
 
 def decode(r: Rexp, bs: List[Boolean]) = decode_aux(r, bs) match {
@@ -107,63 +178,73 @@ def decode(r: Rexp, bs: List[Boolean]) = decode_aux(r, bs) match {
   case _ => throw new Exception("Not decodable")
 }
 
+def encode(v: Val) : List[Boolean] = v match {
+  case Empty => Nil
+  case Chr(c) => Nil
+  case Left(v) => false :: encode(v)
+  case Right(v) => true :: encode(v)
+  case Sequ(v1, v2) => encode(v1) ::: encode(v2)
+  case Stars(Nil) => List(true)
+  case Stars(v::vs) => false :: encode(v) ::: encode(Stars(vs))
+}
+
+
 // nullable function: tests whether the aregular 
 // expression can recognise the empty string
-def nullable (r: ARexp) : Boolean = r match {
+def anullable (r: ARexp) : Boolean = r match {
   case AZERO => false
   case AONE(_) => true
   case ACHAR(_,_) => false
-  case AALT(_, r1, r2) => nullable(r1) || nullable(r2)
-  case ASEQ(_, r1, r2) => nullable(r1) && nullable(r2)
+  case AALT(_, r1, r2) => anullable(r1) || anullable(r2)
+  case ASEQ(_, r1, r2) => anullable(r1) && anullable(r2)
   case ASTAR(_, _) => true
 }
 
 def mkepsBC(r: ARexp) : List[Boolean] = r match {
   case AONE(bs) => bs
   case AALT(bs, r1, r2) => 
-    if (nullable(r1)) bs ++ mkepsBC(r1) else bs ++ mkepsBC(r2)
+    if (anullable(r1)) bs ++ mkepsBC(r1) else bs ++ mkepsBC(r2)
   case ASEQ(bs, r1, r2) => bs ++ mkepsBC(r1) ++ mkepsBC(r2)
   case ASTAR(bs, r) => bs ++ List(true)
 }
 
 // derivative of a regular expression w.r.t. a character
-def der (c: Char, r: ARexp) : ARexp = r match {
+def ader(c: Char, r: ARexp) : ARexp = r match {
   case AZERO => AZERO
   case AONE(_) => AZERO
   case ACHAR(bs, d) => if (c == d) AONE(bs) else AZERO
-  case AALT(bs, r1, r2) => AALT(bs, der(c, r1), der(c, r2))
+  case AALT(bs, r1, r2) => AALT(bs, ader(c, r1), ader(c, r2))
   case ASEQ(bs, r1, r2) => 
-    if (nullable(r1)) AALT(bs, ASEQ(Nil, der(c, r1), r2), fuse(mkepsBC(r1), der(c, r2)))
-    else ASEQ(bs, der(c, r1), r2)
-  case ASTAR(bs, r) => ASEQ(bs, fuse(List(false), der(c, r)), ASTAR(Nil, r))
+    if (anullable(r1)) AALT(bs, ASEQ(Nil, ader(c, r1), r2), fuse(mkepsBC(r1), ader(c, r2)))
+    else ASEQ(bs, ader(c, r1), r2)
+  case ASTAR(bs, r) => ASEQ(bs, fuse(List(false), ader(c, r)), ASTAR(Nil, r))
 }
 
 // derivative w.r.t. a string (iterates der)
 @tailrec
-def ders (s: List[Char], r: ARexp) : ARexp = s match {
+def aders (s: List[Char], r: ARexp) : ARexp = s match {
   case Nil => r
-  case c::s => ders(s, der(c, r))
+  case c::s => aders(s, ader(c, r))
 }
 
 // main unsimplified lexing function (produces a value)
-def lex(r: ARexp, s: List[Char]) : List[Boolean] = s match {
-  case Nil => if (nullable(r)) mkepsBC(r) else throw new Exception("Not matched")
-  case c::cs => lex(der(c, r), cs)
+def alex(r: ARexp, s: List[Char]) : List[Boolean] = s match {
+  case Nil => if (anullable(r)) mkepsBC(r) else throw new Exception("Not matched")
+  case c::cs => alex(ader(c, r), cs)
 }
 
-def pre_lexing(r: Rexp, s: String) = lex(internalise(r), s.toList)
-def lexing(r: Rexp, s: String) : Val = decode(r, lex(internalise(r), s.toList))
+def pre_alexing(r: ARexp, s: String)  : List[Boolean] = alex(r, s.toList)
+def alexing(r: Rexp, s: String) : Val = decode(r, pre_alexing(internalise(r), s))
 
 
-
-def simp(r: ARexp): ARexp = r match {
-  case ASEQ(bs1, r1, r2) => (simp(r1), simp(r2)) match {
+def asimp(r: ARexp): ARexp = r match {
+  case ASEQ(bs1, r1, r2) => (asimp(r1), asimp(r2)) match {
       case (AZERO, _) => AZERO
       case (_, AZERO) => AZERO
       case (AONE(bs2), r2s) => fuse(bs1 ++ bs2, r2s)
       case (r1s, r2s) => ASEQ(bs1, r1s, r2s)
   }
-  case AALT(bs1, r1, r2) => (simp(r1), simp(r2)) match {
+  case AALT(bs1, r1, r2) => (asimp(r1), asimp(r2)) match {
       case (AZERO, r2s) => fuse(bs1, r2s)
       case (r1s, AZERO) => fuse(bs1, r1s)
       case (r1s, r2s) => AALT(bs1, r1s, r2s)
@@ -171,12 +252,14 @@ def simp(r: ARexp): ARexp = r match {
   case r => r
 }
 
-def lex_simp(r: ARexp, s: List[Char]) : List[Boolean] = s match {
-  case Nil => if (nullable(r)) mkepsBC(r) else throw new Exception("Not matched")
-  case c::cs => lex(simp(der(c, r)), cs)
+def alex_simp(r: ARexp, s: List[Char]) : List[Boolean] = s match {
+  case Nil => if (anullable(r)) mkepsBC(r) 
+              else throw new Exception("Not matched")
+  case c::cs => alex(asimp(ader(c, r)), cs)
 }
 
-def lexing_simp(r: Rexp, s: String) : Val = decode(r, lex_simp(internalise(r), s.toList))
+def alexing_simp(r: Rexp, s: String) : Val = 
+  decode(r, alex_simp(internalise(r), s.toList))
 
 
 
@@ -188,7 +271,6 @@ def flatten(v: Val) : String = v match {
   case Right(v) => flatten(v)
   case Sequ(v1, v2) => flatten(v1) + flatten(v2)
   case Stars(vs) => vs.map(flatten).mkString
-  case Rec(_, v) => flatten(v)
 }
 
 // extracts an environment from a value
@@ -199,7 +281,6 @@ def env(v: Val) : List[(String, String)] = v match {
   case Right(v) => env(v)
   case Sequ(v1, v2) => env(v1) ::: env(v2)
   case Stars(vs) => vs.flatMap(env)
-  case Rec(x, v) => (x, flatten(v))::env(v)
 }
 
 // Some Tests
@@ -214,70 +295,27 @@ def time_needed[T](i: Int, code: => T) = {
 
 
 val rf = ("a" | "ab") ~ ("ab" | "")
-println(pre_lexing(rf, "ab"))
-println(lexing(rf, "ab"))
-println(lexing_simp(rf, "ab"))
+println(pre_alexing(internalise(rf), "ab"))
+println(alexing(rf, "ab"))
+println(alexing_simp(rf, "ab"))
 
 val r0 = ("a" | "ab") ~ ("b" | "")
-println(pre_lexing(r0, "ab"))
-println(lexing(r0, "ab"))
-println(lexing_simp(r0, "ab"))
+println(pre_alexing(internalise(r0), "ab"))
+println(alexing(r0, "ab"))
+println(alexing_simp(r0, "ab"))
 
 val r1 = ("a" | "ab") ~ ("bcd" | "cd")
-println(lexing(r1, "abcd"))
-println(lexing_simp(r1, "abcd"))
+println(alexing(r1, "abcd"))
+println(alexing_simp(r1, "abcd"))
 
-println(lexing((("" | "a") ~ ("ab" | "b")), "ab"))
-println(lexing_simp((("" | "a") ~ ("ab" | "b")), "ab"))
+println(alexing((("" | "a") ~ ("ab" | "b")), "ab"))
+println(alexing_simp((("" | "a") ~ ("ab" | "b")), "ab"))
 
-println(lexing((("" | "a") ~ ("b" | "ab")), "ab"))
-println(lexing_simp((("" | "a") ~ ("b" | "ab")), "ab"))
+println(alexing((("" | "a") ~ ("b" | "ab")), "ab"))
+println(alexing_simp((("" | "a") ~ ("b" | "ab")), "ab"))
 
-println(lexing((("" | "a") ~ ("c" | "ab")), "ab"))
-println(lexing_simp((("" | "a") ~ ("c" | "ab")), "ab"))
-
-
-// Two Simple Tests for the While Language
-//========================================
-
-// Lexing Rules 
-
-def PLUS(r: Rexp) = r ~ r.%
-val SYM = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
-val DIGIT = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
-val ID = SYM ~ (SYM | DIGIT).% 
-val NUM = PLUS(DIGIT)
-val KEYWORD : Rexp = "skip" | "while" | "do" | "if" | "then" | "else" | "read" | "write" | "true" | "false"
-val SEMI: Rexp = ";"
-val OP: Rexp = ":=" | "==" | "-" | "+" | "*" | "!=" | "<" | ">" | "<=" | ">=" | "%" | "/"
-val WHITESPACE = PLUS(" " | "\n" | "\t")
-val RPAREN: Rexp = ")"
-val LPAREN: Rexp = "("
-val BEGIN: Rexp = "{"
-val END: Rexp = "}"
-val STRING: Rexp = "\"" ~ SYM.% ~ "\""
-
-val WHILE_REGS = (("k" $ KEYWORD) | 
-                  ("i" $ ID) | 
-                  ("o" $ OP) | 
-                  ("n" $ NUM) | 
-                  ("s" $ SEMI) | 
-                  ("str" $ STRING) |
-                  ("p" $ (LPAREN | RPAREN)) | 
-                  ("b" $ (BEGIN | END)) | 
-                  ("w" $ WHITESPACE)).%
-
-println("prog0 test")
-
-val prog0 = """read n"""
-println(env(lexing(WHILE_REGS, prog0)))
-println(env(lexing_simp(WHILE_REGS, prog0)))
-
-println("prog1 test")
-
-val prog1 = """read  n; write (n)"""
-println(env(lexing(WHILE_REGS, prog1)))
-println(env(lexing_simp(WHILE_REGS, prog1)))
+println(alexing((("" | "a") ~ ("c" | "ab")), "ab"))
+println(alexing_simp((("" | "a") ~ ("c" | "ab")), "ab"))
 
 
 // Sulzmann's tests
@@ -285,13 +323,158 @@ println(env(lexing_simp(WHILE_REGS, prog1)))
 
 val sulzmann = ("a" | "b" | "ab").%
 
-println(lexing(sulzmann, "a" * 10))
-println(lexing_simp(sulzmann, "a" * 10))
+println(alexing(sulzmann, "a" * 10))
+println(alexing_simp(sulzmann, "a" * 10))
 
-for (i <- 1 to 6501 by 500) {
-  println(i + ": " + "%.5f".format(time_needed(1, lexing_simp(sulzmann, "a" * i))))
+for (i <- 1 to 4001 by 500) {
+  println(i + ": " + "%.5f".format(time_needed(1, alexing_simp(sulzmann, "a" * i))))
 }
 
 for (i <- 1 to 16 by 5) {
-  println(i + ": " + "%.5f".format(time_needed(1, lexing_simp(sulzmann, "ab" * i))))
+  println(i + ": " + "%.5f".format(time_needed(1, alexing_simp(sulzmann, "ab" * i))))
 }
+
+
+
+
+// some automatic testing
+
+def clear() = {
+  print("")
+  //print("\33[H\33[2J")
+}
+
+// enumerates regular expressions until a certain depth
+def enum(n: Int, s: String) : Stream[Rexp] = n match {
+  case 0 => ZERO #:: ONE #:: s.toStream.map(CHAR)
+  case n => {  
+    val rs = enum(n - 1, s)
+    rs #:::
+    (for (r1 <- rs; r2 <- rs) yield ALT(r1, r2)) #:::
+    (for (r1 <- rs; r2 <- rs) yield SEQ(r1, r2)) #:::
+    (for (r1 <- rs) yield STAR(r1))
+  }
+}
+
+
+//enum(2, "ab").size
+//enum(3, "ab").size
+//enum(3, "abc").size
+//enum(4, "ab").size
+
+import scala.util.Try
+
+def test_mkeps(r: Rexp) = {
+  val res1 = Try(Some(mkeps(r))).getOrElse(None)
+  val res2 = Try(Some(decode(r, mkepsBC(internalise(r))))).getOrElse(None) 
+  if (res1 != res2) println(s"Mkeps disagrees on ${r}")
+  if (res1 != res2) Some(r) else (None)
+}
+
+println("Testing mkeps")
+enum(2, "ab").map(test_mkeps).toSet
+//enum(3, "ab").map(test_mkeps).toSet
+//enum(3, "abc").map(test_mkeps).toSet
+
+
+//enumerates strings of length n over alphabet cs
+def strs(n: Int, cs: String) : Set[String] = {
+  if (n == 0) Set("")
+  else {
+    val ss = strs(n - 1, cs)
+    ss ++
+    (for (s <- ss; c <- cs.toList) yield c + s)
+  }
+}
+
+//tests lexing and lexingB
+def tests_inj(ss: Set[String])(r: Rexp) = {
+  clear()
+  println(s"Testing ${r}")
+  for (s <- ss.par) yield {
+    val res1 = Try(Some(alexing(r, s))).getOrElse(None)
+    val res2 = Try(Some(alexing_simp(r, s))).getOrElse(None)
+    if (res1 != res2) println(s"Disagree on ${r} and ${s}")
+    if (res1 != res2) println(s"   ${res1} !=  ${res2}")
+    if (res1 != res2) Some((r, s)) else None
+  }
+}
+
+//println("Testing lexing 1")
+//enum(2, "ab").map(tests_inj(strs(2, "ab"))).toSet
+//println("Testing lexing 2")
+//enum(2, "ab").map(tests_inj(strs(3, "abc"))).toSet
+//println("Testing lexing 3")
+//enum(3, "ab").map(tests_inj(strs(3, "abc"))).toSet
+
+
+def tests_alexer(ss: Set[String])(r: Rexp) = {
+  clear()
+  println(s"Testing ${r}")
+  for (s <- ss.par) yield {
+    val d = der('b', r)
+    val ad = ader('b', internalise(r))
+    val res1 = Try(Some(encode(inj(r, 'a', alexing(d, s))))).getOrElse(None)
+    val res2 = Try(Some(pre_alexing(ad, s))).getOrElse(None)
+    if (res1 != res2) println(s"Disagree on ${r} and 'a'::${s}")
+    if (res1 != res2) println(s"   ${res1} !=  ${res2}")
+    if (res1 != res2) Some((r, s)) else None
+  }
+}
+
+println("Testing alexing 1")
+println(enum(2, "ab").map(tests_alexer(strs(2, "ab"))).toSet)
+
+
+def values(r: Rexp) : Set[Val] = r match {
+  case ZERO => Set()
+  case ONE => Set(Empty)
+  case CHAR(c) => Set(Chr(c))
+  case ALT(r1, r2) => (for (v1 <- values(r1)) yield Left(v1)) ++ 
+                      (for (v2 <- values(r2)) yield Right(v2))
+  case SEQ(r1, r2) => for (v1 <- values(r1); v2 <- values(r2)) yield Sequ(v1, v2)
+  case STAR(r) => (Set(Stars(Nil)) ++ 
+                  (for (v <- values(r)) yield Stars(List(v)))) 
+    // to do more would cause the set to be infinite
+}
+
+def tests_ader(c: Char)(r: Rexp) = {
+  val d = der(c, r)
+  val vals = values(d)
+  for (v <- vals) {
+    println(s"Testing ${r} and ${v}")
+    val res1 = retrieve(ader(c, internalise(r)), v)
+    val res2 = encode(inj(r, c, decode(d, retrieve(internalise(der(c, r)), v))))
+    if (res1 != res2) println(s"Disagree on ${r}, ${v} and der = ${d}")
+    if (res1 != res2) println(s"   ${res1} !=  ${res2}")
+    if (res1 != res2) Some((r, v)) else None
+  }
+}
+
+println("Testing ader/der")
+println(enum(2, "ab").map(tests_ader('a')).toSet)
+
+val er = SEQ(ONE,CHAR('a')) 
+val ev = Right(Empty) 
+val ed = ALT(SEQ(ZERO,CHAR('a')),ONE)
+
+retrieve(internalise(ed), ev) // => [true]
+internalise(er)
+ader('a', internalise(er))
+retrieve(ader('a', internalise(er)), ev) // => []
+decode(ed, List(true)) // gives the value for derivative
+decode(er, List())     // gives the value for original value
+
+
+val dr = STAR(CHAR('a'))
+val dr_der = SEQ(ONE,STAR(CHAR('a'))) // derivative of dr
+val dr_val = Sequ(Empty,Stars(List())) // value of dr_def
+
+
+val res1 = retrieve(internalise(der('a', dr)), dr_val) // => [true]
+val res2 = retrieve(ader('a', internalise(dr)), dr_val) // => [false, true]
+decode(dr_der, res1) // gives the value for derivative
+decode(dr, res2)     // gives the value for original value
+
+encode(inj(dr, 'a', decode(dr_der, res1)))
+

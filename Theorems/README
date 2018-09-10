@@ -10,10 +10,13 @@ The repository can be checked using Isabelle 2016.
 
   isabelle build -c -v -d . Paper
 
-Othe directories are:
+  isabelle build -c -v -d . Journal
+
+Other directories are:
 =====================
 
   Paper
+  Journal
   Literature
   
 

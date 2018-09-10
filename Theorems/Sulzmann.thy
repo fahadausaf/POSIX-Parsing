@@ -1,63 +1,23 @@
    
 theory Sulzmann
-  imports "Lexer" "~~/src/HOL/Library/Multiset"
+  imports "Lexer" 
 begin
-
-
-section {* Sulzmann's "Ordering" of Values *}
-
-
-inductive ValOrd :: "val \<Rightarrow> rexp \<Rightarrow> val \<Rightarrow> bool" ("_ >_ _" [100, 100, 100] 100)
-where
-  C2: "v1 >r1 v1' \<Longrightarrow> (Seq v1 v2) >(SEQ r1 r2) (Seq v1' v2')" 
-| C1: "v2 >r2 v2' \<Longrightarrow> (Seq v1 v2) >(SEQ r1 r2) (Seq v1 v2')" 
-| A1: "length (flat v2) > length (flat v1) \<Longrightarrow> (Right v2) >(ALT r1 r2) (Left v1)"
-| A2: "length (flat v1) \<ge> length (flat v2) \<Longrightarrow> (Left v1) >(ALT r1 r2) (Right v2)"
-| A3: "v2 >r2 v2' \<Longrightarrow> (Right v2) >(ALT r1 r2) (Right v2')"
-| A4: "v1 >r1 v1' \<Longrightarrow> (Left v1) >(ALT r1 r2) (Left v1')"
-| K1: "flat (Stars (v # vs)) = [] \<Longrightarrow> (Stars []) >(STAR r) (Stars (v # vs))"
-| K2: "flat (Stars (v # vs)) \<noteq> [] \<Longrightarrow> (Stars (v # vs)) >(STAR r) (Stars [])"
-| K3: "v1 >r v2 \<Longrightarrow> (Stars (v1 # vs1)) >(STAR r) (Stars (v2 # vs2))"
-| K4: "(Stars vs1) >(STAR r) (Stars vs2) \<Longrightarrow> (Stars (v # vs1)) >(STAR r) (Stars (v # vs2))"
-
-definition ValOrdEq :: "val \<Rightarrow> rexp \<Rightarrow> val \<Rightarrow> bool" ("_ \<ge>_ _" [100, 100, 100] 100)
-where 
-  "v\<^sub>1 \<ge>r v\<^sub>2 \<equiv> v\<^sub>1 = v\<^sub>2 \<or> (v\<^sub>1 >r v\<^sub>2 \<and> flat v\<^sub>1 = flat v\<^sub>2)"
-
-(*
-
-
-inductive ValOrd :: "val \<Rightarrow> rexp \<Rightarrow> val \<Rightarrow> bool" ("_ \<succ>_ _" [100, 100, 100] 100)
-where
-  "v2 \<succ>r2 v2' \<Longrightarrow> (Seq v1 v2) \<succ>(SEQ r1 r2) (Seq v1 v2')" 
-| "\<lbrakk>v1 \<succ>r1 v1'; v1 \<noteq> v1'\<rbrakk> \<Longrightarrow> (Seq v1 v2) \<succ>(SEQ r1 r2) (Seq v1' v2')" 
-| "length (flat v1) \<ge> length (flat v2) \<Longrightarrow> (Left v1) \<succ>(ALT r1 r2) (Right v2)"
-| "length (flat v2) > length (flat v1) \<Longrightarrow> (Right v2) \<succ>(ALT r1 r2) (Left v1)"
-| "v2 \<succ>r2 v2' \<Longrightarrow> (Right v2) \<succ>(ALT r1 r2) (Right v2')"
-| "v1 \<succ>r1 v1' \<Longrightarrow> (Left v1) \<succ>(ALT r1 r2) (Left v1')"
-| "Void \<succ>EMPTY Void"
-| "(Char c) \<succ>(CHAR c) (Char c)"
-| "flat (Stars (v # vs)) = [] \<Longrightarrow> (Stars []) \<succ>(STAR r) (Stars (v # vs))"
-| "flat (Stars (v # vs)) \<noteq> [] \<Longrightarrow> (Stars (v # vs)) \<succ>(STAR r) (Stars [])"
-| "\<lbrakk>v1 \<succ>r v2; v1 \<noteq> v2\<rbrakk> \<Longrightarrow> (Stars (v1 # vs1)) \<succ>(STAR r) (Stars (v2 # vs2))"
-| "(Stars vs1) \<succ>(STAR r) (Stars vs2) \<Longrightarrow> (Stars (v # vs1)) \<succ>(STAR r) (Stars (v # vs2))"
-| "(Stars []) \<succ>(STAR r) (Stars [])"
-*)
-
 
 section {* Bit-Encodings *}
 
+datatype bit = Z | S
 
 fun 
-  code :: "val \<Rightarrow> rexp \<Rightarrow> bool list"
+  code :: "val \<Rightarrow> bit list"
 where
-  "code Void ONE = []"
-| "code (Char c) (CHAR d) = []"
-| "code (Left v) (ALT r1 r2) = False # (code v r1)"
-| "code (Right v) (ALT r1 r2) = True # (code v r2)"
-| "code (Seq v1 v2) (SEQ r1 r2) = (code v1 r1) @ (code v2 r2)"
-| "code (Stars []) (STAR r) = [True]"
-| "code (Stars (v # vs)) (STAR r) =  False # (code v r) @ code (Stars vs) (STAR r)"
+  "code Void = []"
+| "code (Char c) = []"
+| "code (Left v) = Z # (code v)"
+| "code (Right v) = S # (code v)"
+| "code (Seq v1 v2) = (code v1) @ (code v2)"
+| "code (Stars []) = [S]"
+| "code (Stars (v # vs)) =  (Z # code v) @ code (Stars vs)"
+
 
 fun 
   Stars_add :: "val \<Rightarrow> val \<Rightarrow> val"
@@ -65,28 +25,22 @@ where
   "Stars_add v (Stars vs) = Stars (v # vs)"
 
 function
-  decode' :: "bool list \<Rightarrow> rexp \<Rightarrow> (val * bool list)"
+  decode' :: "bit list \<Rightarrow> rexp \<Rightarrow> (val * bit list)"
 where
   "decode' ds ZERO = (Void, [])"
 | "decode' ds ONE = (Void, ds)"
 | "decode' ds (CHAR d) = (Char d, ds)"
 | "decode' [] (ALT r1 r2) = (Void, [])"
-| "decode' (False # ds) (ALT r1 r2) = (let (v, ds') = decode' ds r1 in (Left v, ds'))"
-| "decode' (True # ds) (ALT r1 r2) = (let (v, ds') = decode' ds r2 in (Right v, ds'))"
+| "decode' (Z # ds) (ALT r1 r2) = (let (v, ds') = decode' ds r1 in (Left v, ds'))"
+| "decode' (S # ds) (ALT r1 r2) = (let (v, ds') = decode' ds r2 in (Right v, ds'))"
 | "decode' ds (SEQ r1 r2) = (let (v1, ds') = decode' ds r1 in
                              let (v2, ds'') = decode' ds' r2 in (Seq v1 v2, ds''))"
 | "decode' [] (STAR r) = (Void, [])"
-| "decode' (True # ds) (STAR r) = (Stars [], ds)"
-| "decode' (False # ds) (STAR r) = (let (v, ds') = decode' ds r in
+| "decode' (S # ds) (STAR r) = (Stars [], ds)"
+| "decode' (Z # ds) (STAR r) = (let (v, ds') = decode' ds r in
                                     let (vs, ds'') = decode' ds' (STAR r) 
                                     in (Stars_add v vs, ds''))"
 by pat_completeness auto
-
-termination
-apply(size_change)
-oops
-
-term "inv_image (measure(%cs. size cs) <*lex*> measure(%s. size s)) (%(ds,r). (r,ds))"
 
 lemma decode'_smaller:
   assumes "decode'_dom (ds, r)"
@@ -102,34 +56,44 @@ apply(relation "inv_image (measure(%cs. size cs) <*lex*> measure(%s. size s)) (%
 apply(auto dest!: decode'_smaller)
 by (metis less_Suc_eq_le snd_conv)
 
-fun 
-  decode :: "bool list \<Rightarrow> rexp \<Rightarrow> val option"
+definition
+  decode :: "bit list \<Rightarrow> rexp \<Rightarrow> val option"
 where
-  "decode ds r = (let (v, ds') = decode' ds r 
+  "decode ds r \<equiv> (let (v, ds') = decode' ds r 
                   in (if ds' = [] then Some v else None))"
 
-lemma decode'_code:
-  assumes "\<turnstile> v : r"
-  shows "decode' ((code v r) @ ds) r = (v, ds)"
-using assms
-by (induct v r arbitrary: ds) (auto)
+lemma decode'_code_Stars:
+  assumes "\<forall>v\<in>set vs. \<Turnstile> v : r \<and> (\<forall>x. decode' (code v @ x) r = (v, x)) \<and> flat v \<noteq> []" 
+  shows "decode' (code (Stars vs) @ ds) (STAR r) = (Stars vs, ds)"
+  using assms
+  apply(induct vs)
+  apply(auto)
+  done
 
+lemma decode'_code:
+  assumes "\<Turnstile> v : r"
+  shows "decode' ((code v) @ ds) r = (v, ds)"
+using assms
+  apply(induct v r arbitrary: ds) 
+  apply(auto)
+  using decode'_code_Stars by blast
 
 lemma decode_code:
-  assumes "\<turnstile> v : r"
-  shows "decode (code v r) r = Some v"
-using assms decode'_code[of _ _ "[]"]
-by auto
+  assumes "\<Turnstile> v : r"
+  shows "decode (code v) r = Some v"
+  using assms unfolding decode_def
+  by (smt append_Nil2 decode'_code old.prod.case)
+
 
 datatype arexp =
   AZERO
-| AONE "bool list"
-| ACHAR "bool list" char
-| ASEQ "bool list" arexp arexp
-| AALT "bool list" arexp arexp
-| ASTAR "bool list" arexp
+| AONE "bit list"
+| ACHAR "bit list" char
+| ASEQ "bit list" arexp arexp
+| AALT "bit list" arexp arexp
+| ASTAR "bit list" arexp
 
-fun fuse :: "bool list \<Rightarrow> arexp \<Rightarrow> arexp" where
+fun fuse :: "bit list \<Rightarrow> arexp \<Rightarrow> arexp" where
   "fuse bs AZERO = AZERO"
 | "fuse bs (AONE cs) = AONE (bs @ cs)" 
 | "fuse bs (ACHAR cs c) = ACHAR (bs @ cs) c"
@@ -137,72 +101,220 @@ fun fuse :: "bool list \<Rightarrow> arexp \<Rightarrow> arexp" where
 | "fuse bs (ASEQ cs r1 r2) = ASEQ (bs @ cs) r1 r2"
 | "fuse bs (ASTAR cs r) = ASTAR (bs @ cs) r"
 
-fun internalise :: "rexp \<Rightarrow> arexp" where
-  "internalise ZERO = AZERO"
-| "internalise ONE = AONE []"
-| "internalise (CHAR c) = ACHAR [] c"
-| "internalise (ALT r1 r2) = AALT [] (fuse [False] (internalise r1)) 
-                                     (fuse [True]  (internalise r2))"
-| "internalise (SEQ r1 r2) = ASEQ [] (internalise r1) (internalise r2)"
-| "internalise (STAR r) = ASTAR [] (internalise r)"
+fun intern :: "rexp \<Rightarrow> arexp" where
+  "intern ZERO = AZERO"
+| "intern ONE = AONE []"
+| "intern (CHAR c) = ACHAR [] c"
+| "intern (ALT r1 r2) = AALT [] (fuse [Z] (intern r1)) 
+                                     (fuse [S]  (intern r2))"
+| "intern (SEQ r1 r2) = ASEQ [] (intern r1) (intern r2)"
+| "intern (STAR r) = ASTAR [] (intern r)"
 
-fun retrieve :: "arexp \<Rightarrow> val \<Rightarrow> bool list" where
+
+fun retrieve :: "arexp \<Rightarrow> val \<Rightarrow> bit list" where
   "retrieve (AONE bs) Void = bs"
 | "retrieve (ACHAR bs c) (Char d) = bs"
 | "retrieve (AALT bs r1 r2) (Left v) = bs @ retrieve r1 v"
 | "retrieve (AALT bs r1 r2) (Right v) = bs @ retrieve r2 v"
 | "retrieve (ASEQ bs r1 r2) (Seq v1 v2) = bs @ retrieve r1 v1 @ retrieve r2 v2"
-| "retrieve (ASTAR bs r) (Stars []) = bs @ [True]"
+| "retrieve (ASTAR bs r) (Stars []) = bs @ [S]"
 | "retrieve (ASTAR bs r) (Stars (v#vs)) = 
-     bs @ [False] @ retrieve r v @ retrieve (ASTAR [] r) (Stars vs)"
-
-fun
- anullable :: "arexp \<Rightarrow> bool"
-where
-  "anullable (AZERO) = False"
-| "anullable (AONE bs) = True"
-| "anullable (ACHAR bs c) = False"
-| "anullable (AALT bs r1 r2) = (anullable r1 \<or> anullable r2)"
-| "anullable (ASEQ bs r1 r2) = (anullable r1 \<and> anullable r2)"
-| "anullable (ASTAR bs r) = True"
+     bs @ [Z] @ retrieve r v @ retrieve (ASTAR [] r) (Stars vs)"
 
 fun 
-  amkeps :: "arexp \<Rightarrow> bool list"
+  erase :: "arexp \<Rightarrow> rexp"
 where
-  "amkeps(AONE bs) = bs"
-| "amkeps(ASEQ bs r1 r2) = bs @ (amkeps r1) @ (amkeps r2)"
-| "amkeps(AALT bs r1 r2) = (if anullable(r1) then bs @ (amkeps r1) else bs @ (amkeps r2))"
-| "amkeps(ASTAR bs r) = bs @ [True]"
+  "erase AZERO = ZERO"
+| "erase (AONE _) = ONE"
+| "erase (ACHAR _ c) = CHAR c"
+| "erase (AALT _ r1 r2) = ALT (erase r1) (erase r2)"
+| "erase (ASEQ _ r1 r2) = SEQ (erase r1) (erase r2)"
+| "erase (ASTAR _ r) = STAR (erase r)"
+
+fun
+ bnullable :: "arexp \<Rightarrow> bool"
+where
+  "bnullable (AZERO) = False"
+| "bnullable (AONE bs) = True"
+| "bnullable (ACHAR bs c) = False"
+| "bnullable (AALT bs r1 r2) = (bnullable r1 \<or> bnullable r2)"
+| "bnullable (ASEQ bs r1 r2) = (bnullable r1 \<and> bnullable r2)"
+| "bnullable (ASTAR bs r) = True"
+
+fun 
+  bmkeps :: "arexp \<Rightarrow> bit list"
+where
+  "bmkeps(AONE bs) = bs"
+| "bmkeps(ASEQ bs r1 r2) = bs @ (bmkeps r1) @ (bmkeps r2)"
+| "bmkeps(AALT bs r1 r2) = (if bnullable(r1) then bs @ (bmkeps r1) else bs @ (bmkeps r2))"
+| "bmkeps(ASTAR bs r) = bs @ [S]"
 
 
 fun
- ader :: "char \<Rightarrow> arexp \<Rightarrow> arexp"
+ bder :: "char \<Rightarrow> arexp \<Rightarrow> arexp"
 where
-  "ader c (AZERO) = AZERO"
-| "ader c (AONE bs) = AZERO"
-| "ader c (ACHAR bs d) = (if c = d then AONE bs else AZERO)"
-| "ader c (AALT bs r1 r2) = AALT bs (ader c r1) (ader c r2)"
-| "ader c (ASEQ bs r1 r2) = 
-     (if anullable r1
-      then AALT bs (ASEQ [] (ader c r1) r2) (fuse (amkeps r1) (ader c r2))
-      else ASEQ bs (ader c r1) r2)"
-| "ader c (ASTAR bs r) = ASEQ bs (fuse [False] (ader c r)) (ASTAR [] r)"
+  "bder c (AZERO) = AZERO"
+| "bder c (AONE bs) = AZERO"
+| "bder c (ACHAR bs d) = (if c = d then AONE bs else AZERO)"
+| "bder c (AALT bs r1 r2) = AALT bs (bder c r1) (bder c r2)"
+| "bder c (ASEQ bs r1 r2) = 
+     (if bnullable r1
+      then AALT bs (ASEQ [] (bder c r1) r2) (fuse (bmkeps r1) (bder c r2))
+      else ASEQ bs (bder c r1) r2)"
+| "bder c (ASTAR bs r) = ASEQ bs (fuse [Z] (bder c r)) (ASTAR [] r)"
 
-lemma
-  assumes "\<turnstile> v : der c r"
-  shows "Some (injval r c v) = decode (retrieve (ader c (internalise r)) v) r"
-using assms
-apply(induct c r arbitrary: v rule: der.induct)
-apply(simp_all)
-apply(erule Prf_elims)
-apply(erule Prf_elims)
-apply(case_tac "c = d")
-apply(simp)
-apply(erule Prf_elims)
-apply(simp)
-apply(simp)
-apply(erule Prf_elims)
-apply(auto split: prod.splits)[1]
-oops
 
+fun 
+  bders :: "arexp \<Rightarrow> string \<Rightarrow> arexp"
+where
+  "bders r [] = r"
+| "bders r (c#s) = bders (bder c r) s"
+
+lemma bders_append:
+  "bders r (s1 @ s2) = bders (bders r s1) s2"
+  apply(induct s1 arbitrary: r s2)
+  apply(simp_all)
+  done
+
+lemma bnullable_correctness:
+  shows "nullable (erase r) = bnullable r"
+  apply(induct r)
+  apply(simp_all)
+  done
+
+lemma erase_fuse:
+  shows "erase (fuse bs r) = erase r"
+  apply(induct r)
+  apply(simp_all)
+  done
+
+lemma erase_intern[simp]:
+  shows "erase (intern r) = r"
+  apply(induct r)
+  apply(simp_all add: erase_fuse)
+  done
+
+lemma erase_bder[simp]:
+  shows "erase (bder a r) = der a (erase r)"
+  apply(induct r)
+  apply(simp_all add: erase_fuse bnullable_correctness)
+  done
+
+lemma erase_bders[simp]:
+  shows "erase (bders r s) = ders s (erase r)"
+  apply(induct s arbitrary: r )
+  apply(simp_all)
+  done
+
+lemma retrieve_encode_STARS:
+  assumes "\<forall>v\<in>set vs. \<Turnstile> v : r \<and> code v = retrieve (intern r) v"
+  shows "code (Stars vs) = retrieve (ASTAR [] (intern r)) (Stars vs)"
+  using assms
+  apply(induct vs)
+  apply(simp_all)
+  done
+
+lemma retrieve_fuse2:
+  assumes "\<Turnstile> v : (erase r)"
+  shows "retrieve (fuse bs r) v = bs @ retrieve r v"
+  using assms
+  apply(induct r arbitrary: v bs)
+  using retrieve_encode_STARS
+  apply(auto elim!: Prf_elims)
+  apply(case_tac vs)
+  apply(simp)
+  apply(simp)
+  done
+
+lemma retrieve_fuse:
+  assumes "\<Turnstile> v : r"
+  shows "retrieve (fuse bs (intern r)) v = bs @ retrieve (intern r) v"
+  using assms 
+  by (simp_all add: retrieve_fuse2)
+
+
+lemma retrieve_code:
+  assumes "\<Turnstile> v : r"
+  shows "code v = retrieve (intern r) v"
+  using assms
+  apply(induct v r)
+  apply(simp_all add: retrieve_fuse retrieve_encode_STARS)
+  done
+
+
+lemma bmkeps_retrieve:
+  assumes "nullable (erase r)"
+  shows "bmkeps r = retrieve r (mkeps (erase r))"
+  using assms
+  apply(induct r)
+  apply(auto simp add: bnullable_correctness)
+  done
+  
+lemma bder_retrieve:
+  assumes "\<Turnstile> v : der c (erase r)"
+  shows "retrieve (bder c r) v = retrieve r (injval (erase r) c v)"
+  using assms
+  apply(induct r arbitrary: v)
+  apply(auto elim!: Prf_elims simp add: retrieve_fuse2 bnullable_correctness bmkeps_retrieve)
+  done
+
+lemma MAIN_decode:
+  assumes "\<Turnstile> v : ders s r"
+  shows "Some (flex r id s v) = decode (retrieve (bders (intern r) s) v) r"
+  using assms
+proof (induct s arbitrary: v rule: rev_induct)
+  case Nil
+  have "\<Turnstile> v : ders [] r" by fact
+  then have "\<Turnstile> v : r" by simp
+  then have "Some v = decode (retrieve (intern r) v) r"
+    using decode_code retrieve_code by auto
+  then show "Some (flex r id [] v) = decode (retrieve (bders (intern r) []) v) r"
+    by simp
+next
+  case (snoc c s v)
+  have IH: "\<And>v. \<Turnstile> v : ders s r \<Longrightarrow> 
+     Some (flex r id s v) = decode (retrieve (bders (intern r) s) v) r" by fact
+  have asm: "\<Turnstile> v : ders (s @ [c]) r" by fact
+  then have asm2: "\<Turnstile> injval (ders s r) c v : ders s r" 
+    by(simp add: Prf_injval ders_append)
+  have "Some (flex r id (s @ [c]) v) = Some (flex r id s (injval (ders s r) c v))"
+    by (simp add: flex_append)
+  also have "... = decode (retrieve (bders (intern r) s) (injval (ders s r) c v)) r"
+    using asm2 IH by simp
+  also have "... = decode (retrieve (bder c (bders (intern r) s)) v) r"
+    using asm by(simp_all add: bder_retrieve ders_append)
+  finally show "Some (flex r id (s @ [c]) v) = 
+                 decode (retrieve (bders (intern r) (s @ [c])) v) r" by (simp add: bders_append)
+qed
+
+
+definition blexer where
+ "blexer r s \<equiv> if bnullable (bders (intern r) s) then 
+                decode (bmkeps (bders (intern r) s)) r else None"
+
+lemma blexer_correctness:
+  shows "blexer r s = lexer r s"
+proof -
+  { define bds where "bds \<equiv> bders (intern r) s"
+    define ds  where "ds \<equiv> ders s r"
+    assume asm: "nullable ds"
+    have era: "erase bds = ds" 
+      unfolding ds_def bds_def by simp
+    have mke: "\<Turnstile> mkeps ds : ds"
+      using asm by (simp add: mkeps_nullable)
+    have "decode (bmkeps bds) r = decode (retrieve bds (mkeps ds)) r"
+      using bmkeps_retrieve
+      using asm era by (simp add: bmkeps_retrieve)
+    also have "... =  Some (flex r id s (mkeps ds))"
+      using mke by (simp_all add: MAIN_decode ds_def bds_def)
+    finally have "decode (bmkeps bds) r = Some (flex r id s (mkeps ds))" 
+      unfolding bds_def ds_def .
+  }
+  then show "blexer r s = lexer r s"
+    unfolding blexer_def lexer_flex
+    by(auto simp add: bnullable_correctness[symmetric])
+qed
+
+unused_thms
+  
 end

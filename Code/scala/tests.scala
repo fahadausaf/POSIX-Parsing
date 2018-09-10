@@ -32,7 +32,47 @@ case class Sequ(v1: Val, v2: Val) extends Val
 case class Left(v: Val) extends Val
 case class Right(v: Val) extends Val
 case class Stars(vs: List[Val]) extends Val
+
    
+def Pos(v: Val) : Set[List[Int]] = v match {
+  case Empty => Set(Nil)
+  case Chr(c) => Set(Nil)
+  case Left(v) => Set(Nil) ++ Pos(v).map(0::_) 
+  case Right(v) => Set(Nil) ++ Pos(v).map(1::_)
+  case Sequ(v1, v2) => Set(Nil) ++ Pos(v1).map(0::_) ++ Pos(v2).map(1::_)
+  case Stars(vs) => Set(Nil) ++ vs.zipWithIndex.map{ case (v, n) => n::Pos(v) }
+} 
+
+val v1 = Sequ(Chr('a'), Chr('b'))
+val ps1 = Pos(v1)
+
+val v2 = Left(Sequ(Chr('a'), Chr('b')))
+val ps2 = Pos(v2)
+
+val v3 = Stars(List(Left(Chr('x')), Right(Left(Chr('y')))))
+val v4 = Stars(List(Right(Right(Sequ(Chr('x'), Chr('y'))))))
+
+val ps3 = Pos(v3)
+val ps4 = Pos(v4)
+
+def At(v: Val, ps: List[Int]) : Val = (v, ps) match {
+  case (v, Nil) => v
+  case (Left(v), 0::ps) => At(v, ps)
+  case (Right(v), 1::ps) => At(v, ps)
+  case (Sequ(v1, v2), 0::ps) => At(v1, ps)
+  case (Sequ(v1, v2), 1::ps) => At(v2, ps)
+  case (Stars(vs), n::ps) => At(vs(n), ps)
+} 
+
+ps1.map(At(v1, _))
+ps2.map(At(v2, _))
+
+import scala.math.Ordering.Implicits._
+ps1.toList.sorted
+
+List(List(1, 1), List(1), List(0, 1)).sorted
+
+
 // nullable function: tests whether the regular 
 // expression can recognise the empty string
 def nullable (r: Rexp) : Boolean = r match {

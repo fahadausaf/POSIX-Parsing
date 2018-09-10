@@ -2,16 +2,16 @@ import scala.language.implicitConversions
 import scala.language.reflectiveCalls
 import scala.annotation.tailrec   
 import scala.io.Source
+import scala.util._
 
 abstract class Rexp 
 case object ZERO extends Rexp
 case object ONE extends Rexp
-case class CHAR(c: Char) extends Rexp
+case class CHARS(f: Char => Boolean) extends Rexp
 case class ALT(r1: Rexp, r2: Rexp) extends Rexp 
 case class SEQ(r1: Rexp, r2: Rexp) extends Rexp 
 case class STAR(r: Rexp) extends Rexp 
 case class RECD(x: String, r: Rexp) extends Rexp
-case class CRANGE(cs: String) extends Rexp
 case class PLUS(r: Rexp) extends Rexp
 case class OPT(r: Rexp) extends Rexp
 case class NTIMES(r: Rexp, n: Int) extends Rexp
@@ -28,8 +28,8 @@ case class Rec(x: String, v: Val) extends Val
 // some convenience for typing in regular expressions
 def charlist2rexp(s : List[Char]): Rexp = s match {
   case Nil => ONE
-  case c::Nil => CHAR(c)
-  case c::s => SEQ(CHAR(c), charlist2rexp(s))
+  case c::Nil => CHARS(_ == c)
+  case c::s => SEQ(CHARS(_ == c), charlist2rexp(s))
 }
 implicit def string2rexp(s : String) : Rexp = charlist2rexp(s.toList)
 
@@ -68,12 +68,11 @@ def SEQS(rs: Rexp*) = Seqs(rs.toList)
 def nullable (r: Rexp) : Boolean = r match {
   case ZERO => false
   case ONE => true
-  case CHAR(_) => false
+  case CHARS(_) => false
   case ALT(r1, r2) => nullable(r1) || nullable(r2)
   case SEQ(r1, r2) => nullable(r1) && nullable(r2)
   case STAR(_) => true
   case RECD(_, r1) => nullable(r1)
-  case CRANGE(_) => false
   case PLUS(r) => nullable(r)
   case OPT(_) => true
   case NTIMES(r, n) => if (n == 0) true else nullable(r)
@@ -83,17 +82,16 @@ def nullable (r: Rexp) : Boolean = r match {
 def der (c: Char, r: Rexp) : Rexp = r match {
   case ZERO => ZERO
   case ONE => ZERO
-  case CHAR(d) => if (c == d) ONE else ZERO
+  case CHARS(f) => if (f(c)) ONE else ZERO
   case ALT(r1, r2) => ALT(der(c, r1), der(c, r2))
   case SEQ(r1, r2) => 
     if (nullable(r1)) ALT(SEQ(der(c, r1), r2), der(c, r2))
     else SEQ(der(c, r1), r2)
   case STAR(r) => SEQ(der(c, r), STAR(r))
   case RECD(_, r1) => der(c, r1)
-  case CRANGE(cs) => if (cs.contains(c)) ONE else ZERO
   case PLUS(r) => SEQ(der(c, r), STAR(r))
   case OPT(r) => ALT(der(c, r), ZERO)
-  case NTIMES(r, n) => if (n == 0) ZERO else der(c, SEQ(r, NTIMES(r, n - 1)))
+  case NTIMES(r, n) => if (n == 0) ZERO else SEQ(der(c, r), NTIMES(r, n - 1))
 }
 
 // derivative w.r.t. a string (iterates der)
@@ -136,7 +134,7 @@ def mkeps(r: Rexp) : Val = r match {
   case RECD(x, r) => Rec(x, mkeps(r))
   case PLUS(r) => Stars(List(mkeps(r)))
   case OPT(_) => Right(Empty)
-  case NTIMES(r, n) => if (n == 0) Stars(Nil) else Stars(Nil.padTo(n, mkeps(r)))
+  case NTIMES(r, n) => Stars(List.fill(n)(mkeps(r)))
 }
 
 
@@ -147,14 +145,11 @@ def inj(r: Rexp, c: Char, v: Val) : Val = (r, v) match {
   case (SEQ(r1, r2), Right(v2)) => Sequ(mkeps(r1), inj(r2, c, v2))
   case (ALT(r1, r2), Left(v1)) => Left(inj(r1, c, v1))
   case (ALT(r1, r2), Right(v2)) => Right(inj(r2, c, v2))
-  case (CHAR(d), Empty) => Chr(c) 
+  case (CHARS(_), Empty) => Chr(c) 
   case (RECD(x, r1), _) => Rec(x, inj(r1, c, v))
-  case (CRANGE(_), Empty) => Chr(c) 
   case (PLUS(r), Sequ(v1, Stars(vs))) => Stars(inj(r, c, v1)::vs)
   case (OPT(r), Left(v1)) => Left(inj(r, c, v1))
   case (NTIMES(r, n), Sequ(v1, Stars(vs))) => Stars(inj(r, c, v1)::vs)
-  case (NTIMES(r, n), Left(Sequ(v1, Stars(vs)))) => Stars(inj(r, c, v1)::vs)
-  case (NTIMES(r, n), Right(Stars(v::vs))) => Stars(mkeps(r)::inj(r, c, v)::vs)
 }
 
 // main unsimplified lexing function (produces a value)
@@ -163,7 +158,9 @@ def lex(r: Rexp, s: List[Char]) : Val = s match {
   case c::cs => inj(r, c, lex(der(c, r), cs))
 }
 
-def lexing(r: Rexp, s: String) : Val = lex(r, s.toList)
+
+
+def lexing(r: Rexp, s: String) : Try[Val] = Try(lex(r, s.toList))
 
 
 // some "rectification" functions for simplification
@@ -223,7 +220,7 @@ def lex_simp(r: Rexp, s: List[Char]) : Val = s match {
   }
 }
 
-def lexing_simp(r: Rexp, s: String) : Val = lex_simp(r, s.toList)
+def lexing_simp(r: Rexp, s: String) : Try[Val] = Try(lex_simp(r, s.toList))
 
 
 // Some Tests
@@ -249,21 +246,33 @@ println(lexing_simp((("" | "a") ~ ("b" | "ab")), "ab"))
 println(lexing_simp((("" | "a") ~ ("c" | "ab")), "ab"))
 
 
+// Some more Tests
+//=================
+val ALL = CHARS((c) => true)
+val reg = ALL.% ~ "a" ~ NTIMES(ALL, 3) ~ "bc"
+
+println(lexing(reg, "axaybzbc"))                     // true
+println(lexing(reg, "aaaaxaybzbc"))                  // true
+
+println(nullable(ders("axaybzbd".toList, reg)))      // false
+println(lexing(reg, "axaybzbd"))                     // false
+
+
+
 
 // Two Simple Tests for the While Language
 //========================================
 
 // Lexing Rules 
 
-def PLUSs(r: Rexp) = r ~ r.%
-val SYM = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
-val DIGIT = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+val SYM = CHARS ("abcdefghijklmnopqrstuvwxyz" contains _)
+val DIGIT = CHARS("0123456789" contains _)
 val ID = SYM ~ (SYM | DIGIT).% 
-val NUM = PLUSs(DIGIT)
+val NUM = PLUS(DIGIT)
 val KEYWORD : Rexp = "skip" | "while" | "do" | "if" | "then" | "else" | "read" | "write" | "true" | "false"
 val SEMI: Rexp = ";"
 val OP: Rexp = ":=" | "==" | "-" | "+" | "*" | "!=" | "<" | ">" | "<=" | ">=" | "%" | "/"
-val WHITESPACE = PLUSs(" " | "\n" | "\t")
+val WHITESPACE = PLUS(" " | "\n" | "\t")
 val RPAREN: Rexp = ")"
 val LPAREN: Rexp = "("
 val BEGIN: Rexp = "{"
@@ -296,12 +305,12 @@ val WHILE_REGS = (KEYWORD |
 println("prog0 test")
 
 val prog0 = """read n"""
-println(env(lexing_simp(WHILE_REGS, prog0)))
+println(env(lexing_simp(WHILE_REGS, prog0).get))
 
 println("prog1 test")
 
 val prog1 = """read  n; write (n)"""
-println(env(lexing_simp(WHILE_REGS, prog1)))
+println(env(lexing_simp(WHILE_REGS, prog1).get))
 
 
 // Bigger Test
@@ -321,7 +330,15 @@ while i < max do {
 }"""
 
 println("prog2 test - tokens")
-println(env(lexing_simp(WHILE_REGS, prog2)))
+println(env(lexing_simp(WHILE_REGS, prog2).get))
+
+
+// replicate prog2
+
+println("prog2 replicated test")
+for (i <- 1 to 88 by 5) {
+  println(i + ": " + "%.5f".format(time_needed(2, lexing_simp(WHILE_REGS, prog2 * i))))
+}
 
 
 val prog3 = """
@@ -340,14 +357,10 @@ write minus2
 """
 
 println("prog3 test - tokens")
-println(env(lexing_simp(WHILE_REGS, prog3)))
+println(env(lexing_simp(WHILE_REGS, prog3).get))
 
-/*
-for (i <- 1 to 80) {
-  print(i.toString + ":  ")
-  time(lexing_simp(WHILE_REGS, prog2 * i))
-}
-*/
+
+
 
 // Sulzmann's tests
 //==================
@@ -368,10 +381,10 @@ for (i <- 1 to 2001 by 500) {
 // first benchmark regex 
 //=======================
 
-val reWord = CRANGE("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+val reWord = CHARS("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" contains _)
 
 val reWordStar = STAR(reWord)
-val reWordPlus = reWord ~ reWordStar
+val reWordPlus = PLUS(reWord)
 val optionSet1 = "-" | "+" | "."
 val optionSet2 = "-" | "."
 val atTheRate = "@"

@@ -4,6 +4,7 @@ import scala.language.implicitConversions
 import scala.language.reflectiveCalls
 import scala.annotation.tailrec   
 import scala.io.Source
+import scala.util._
 
 abstract class Rexp 
 case object ZERO extends Rexp
@@ -141,7 +142,7 @@ def lex(r: Rexp, s: List[Char]) : Val = s match {
   case c::cs => inj(r, c, lex(der(c, r), cs))
 }
 
-def lexing(r: Rexp, s: String) : Val = lex(r, s.toList)
+def lexing(r: Rexp, s: String) : Try[Val] = Try(lex(r, s.toList))
 
 // Examples
 

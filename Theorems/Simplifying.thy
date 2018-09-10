@@ -32,6 +32,7 @@ fun simp_ALT where
 | "simp_ALT (r\<^sub>1, f\<^sub>1) (ZERO, f\<^sub>2) = (r\<^sub>1, F_LEFT f\<^sub>1)"
 | "simp_ALT (r\<^sub>1, f\<^sub>1) (r\<^sub>2, f\<^sub>2) = (ALT r\<^sub>1 r\<^sub>2, F_ALT f\<^sub>1 f\<^sub>2)"
 
+(* where is ZERO *)
 fun simp_SEQ where
   "simp_SEQ (ONE, f\<^sub>1) (r\<^sub>2, f\<^sub>2) = (r\<^sub>2, F_SEQ1 f\<^sub>1 f\<^sub>2)"
 | "simp_SEQ (r\<^sub>1, f\<^sub>1) (ONE, f\<^sub>2) = (r\<^sub>1, F_SEQ2 f\<^sub>1 f\<^sub>2)"
@@ -227,6 +228,144 @@ next
        ultimately show "slexer r (c # s) = lexer r (c # s)" 
          by (simp del: slexer.simps add: slexer_better_simp)
    qed
-qed  
+ qed  
 
+(*
+fun simp2_ALT where
+  "simp2_ALT ZERO r2 seen = (r2, seen)"
+| "simp2_ALT r1 ZERO seen = (r1, seen)"
+| "simp2_ALT r1 r2 seen = (ALT r1 r2, seen)"
+
+fun simp2_SEQ where
+  "simp2_SEQ ZERO r2 seen = (ZERO, seen)"
+| "simp2_SEQ r1 ZERO seen = (ZERO, seen)"
+| "simp2_SEQ ONE r2 seen = (r2, seen \<union> {r2})"
+| "simp2_SEQ r1 ONE seen = (r1, seen \<union> {r1})"
+| "simp2_SEQ r1 r2 seen = (SEQ r1 r2, seen \<union> {SEQ r1 r2})"  
+
+
+
+
+fun 
+  simp2 :: "rexp \<Rightarrow> rexp set \<Rightarrow> rexp * rexp set"
+where
+  "simp2 (ALT r1 r2) seen = 
+      (let (r1s, seen1) = simp2 r1 seen in 
+       let (r2s, seen2) = simp2 r2 seen1 
+       in simp2_ALT r1s r2s seen2)" 
+| "simp2 (SEQ r1 r2) seen = 
+      (let (r1s, _) = simp2 r1 {} in 
+       let (r2s, _) = simp2 r2 {} 
+       in if (SEQ r1s r2s \<in> seen) then (ZERO, seen)
+       else simp2_SEQ r1s r2s seen)"
+| "simp2 r seen = (if r \<in> seen then (ZERO, seen) else (r, seen \<union> {r}))"
+
+
+lemma simp2_ALT[simp]: 
+  shows "L (fst (simp2_ALT r1 r2 seen)) = L r1 \<union> L r2"
+  apply(induct r1 r2 seen rule: simp2_ALT.induct)
+  apply(simp_all)
+  done
+
+lemma test1:
+  shows "snd (simp2_ALT r1 r2 rs) = rs"
+  apply(induct r1 r2 rs rule: simp2_ALT.induct)
+  apply(auto)
+  done
+
+lemma test2:
+  shows "rs \<subseteq> snd (simp2_SEQ r1 r2 rs)"
+  apply(induct r1 r2 rs rule: simp2_SEQ.induct)
+  apply(auto)
+  done
+
+lemma test3:
+  shows "rs \<subseteq> snd (simp2 r rs)"
+  apply(induct r rs rule: simp2.induct)
+  apply(auto split: prod.split)
+  apply (metis set_mp test1)
+  by (meson set_mp test2)
+  
+lemma test3a:
+  shows "\<Union>(L ` snd (simp2 r rs)) \<subseteq> L(r) \<union> (\<Union> (L ` rs))"
+  apply(induct r rs rule: simp2.induct)
+  apply(auto split: prod.split simp add: Sequ_def)
+  apply (smt UN_iff Un_iff set_mp test1)
+    
+
+lemma test:
+  assumes "(\<Union>r' \<in> rs. L r') \<subseteq> L r"
+  shows "L(fst (simp2 r rs)) \<subseteq> L(r)"
+  using assms
+  apply(induct r arbitrary: rs)
+  apply(simp only: simp2.simps)
+  apply(simp)
+  apply(simp only: simp2.simps)
+  apply(simp)
+  apply(simp only: simp2.simps)
+  apply(simp)
+  prefer 3
+  apply(simp only: simp2.simps)
+  apply(simp)
+  prefer 2
+  apply(simp only: simp2.simps)
+   apply(simp)
+   apply(subst prod.split)
+  apply(rule allI)+
+   apply(rule impI)
+  apply(subst prod.split)
+  apply(rule allI)+
+   apply(rule impI)
+   apply(simp)
+   apply(drule_tac x="rs" in meta_spec)
+  apply(simp)
+  apply(drule_tac x="x2" in meta_spec)
+   apply(simp)
+   apply(auto)[1]
+    apply(subgoal_tac "rs \<subseteq> x2a")
+     prefer 2
+  apply (metis order_trans prod.sel(2) test3)
+  
+  
+   apply(rule antisym)
+  prefer 2
+    apply(simp)
+    apply(rule conjI)
+     apply(drule meta_mp)
+  prefer 2
+      apply(simp)
+      apply(auto)[1]
+    apply(auto)[1]
+  
+  thm prod.split
+   apply(auto split: prod.split)[1]
+     apply(drule_tac x="rs" in meta_spec)
+     apply(drule_tac x="rs" in meta_spec)
+     apply(simp)
+     apply(rule_tac x="SEQ x1 x1a" in bexI)
+      apply(simp add: Sequ_def)
+
+      apply(auto)[1]
+     apply(simp)
+  apply(subgoal_tac "L (fst (simp2_SEQ x1 x1a rs)) \<subseteq> L x1 \<union> L x1a")
+     apply(frule_tac x="{}" in meta_spec)
+  apply(rotate_tac 1)
+     apply(frule_tac x="{}" in meta_spec)
+     apply(simp)
+   
+    
+     apply(rule_tac x="SEQ x1 x1a" in bexI)
+      apply(simp add: Sequ_def)
+      apply(auto)[1]
+  apply(simp)
+  using L.simps(2) apply blast
+  prefer 3
+  apply(simp only: simp2.simps)
+    apply(simp)
+  using L.simps(3) apply blast
+  prefer 2
+   apply(simp add: Sequ_def)
+   apply(auto)[1]
+  oops  
+*)
 end
